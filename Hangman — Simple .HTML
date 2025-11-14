@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hangman — Simple HTML Game</title>
+  <style>
+    :root{--bg:#0b1220;--card:#071428;--accent:#f97316;--good:#34d399;--muted:#93c5fd}
+    html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,Arial;background:linear-gradient(180deg,#041027 0%,#06142a 100%);color:#e6eef8}
+    .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
+    .card{width:820px;max-width:100%;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);border-radius:12px;padding:18px;box-shadow:0 6px 30px rgba(2,6,23,0.6)}
+    header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+    h1{font-size:18px;margin:0}
+    .game{display:flex;gap:18px;align-items:flex-start}
+    .left{flex:1}
+    .panel{width:260px;background:var(--card);padding:12px;border-radius:8px;font-size:14px}
+    .word{display:flex;gap:8px;font-size:28px;letter-spacing:6px;margin:18px 0}
+    .letter{min-width:30px;height:44px;border-radius:6px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.02)}
+    .keyboard{display:grid;grid-template-columns:repeat(10,1fr);gap:8px;margin-top:12px}
+    button.key{padding:8px;border-radius:8px;border:0;background:#0ea5a5;color:#021;cursor:pointer;font-weight:700}
+    button.key.disabled{opacity:0.35;cursor:not-allowed}
+    .stats{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,0.03);margin-bottom:8px}
+    .big{font-size:20px;font-weight:700}
+    footer{margin-top:12px;font-size:13px;color:#9fb6c9}
+    .hangman-art{font-family:monospace;white-space:pre;line-height:1}
+    .controls{display:flex;gap:8px;margin-top:12px}
+    button.btn{background:var(--accent);border:0;padding:8px 10px;border-radius:8px;color:#071022;font-weight:700;cursor:pointer}
+    button.secondary{background:transparent;border:1px solid rgba(255,255,255,0.04);color:#9fb6c9}
+    @media (max-width:760px){.game{flex-direction:column}.panel{width:100%}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <header>
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="6" fill="#f97316"/><path d="M6 17h12v2H6z" fill="#2b0b00"/></svg>
+        <div>
+          <h1>Hangman — simple word game</h1>
+          <div style="font-size:13px;color:#9fb6c9">Guess the word one letter at a time. You have limited lives — don't get hung!</div>
+        </div>
+      </header>
+
+      <div class="game">
+        <div class="left">
+          <div class="hangman-art" id="art"> </div>
+
+          <div class="word" id="word"></div>
+
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+            <button id="hintBtn" class="secondary">Hint</button>
+            <button id="restartBtn" class="btn">New Word</button>
+          </div>
+
+          <div style="margin-top:12px;color:#9fb6c9;font-size:13px">Tip: Click letters, or type on your keyboard. Hints reveal one letter and cost a life.</div>
+        </div>
+
+        <div class="panel">
+          <div class="stats"><div>Word length</div><div id="len">—</div></div>
+          <div class="stats"><div>Lives</div><div class="big" id="lives">6</div></div>
+          <div class="stats"><div>Score</div><div id="score">0</div></div>
+
+          <div style="margin-top:8px">Keyboard</div>
+          <div class="keyboard" id="keyboard"></div>
+
+          <div style="margin-top:12px">Guessed letters: <span id="guessed">—</span></div>
+
+          <footer>Made with HTML/CSS/JS — single file. Want multiplayer, categories, or persistence?</footer>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    // Simple Hangman — single-file
+    const words = [
+      'JAVASCRIPT','HANGMAN','COMPUTER','GARDEN','PUZZLE','PLANET','MOONLIGHT','BICYCLE','NOTEBOOK','PYTHON','DEVELOPER','ALGORITHM'
+    ];
+
+    const MAX_LIVES = 6;
+    let secret = '';
+    let revealed = [];
+    let lives = MAX_LIVES;
+    let score = 0;
+    let guessed = new Set();
+
+    const artEl = document.getElementById('art');
+    const wordEl = document.getElementById('word');
+    const keyboardEl = document.getElementById('keyboard');
+    const livesEl = document.getElementById('lives');
+    const lenEl = document.getElementById('len');
+    const scoreEl = document.getElementById('score');
+    const guessedEl = document.getElementById('guessed');
+    const hintBtn = document.getElementById('hintBtn');
+    const restartBtn = document.getElementById('restartBtn');
+
+    const HANG = [
+`  +---+
+  |   |
+      |
+      |
+      |
+      |
+=========`,
+`  +---+
+  |   |
+  O   |
+      |
+      |
+      |
+=========`,
+`  +---+
+  |   |
+  O   |
+  |   |
+      |
+      |
+=========`,
+`  +---+
+  |   |
+  O   |
+ /|   |
+      |
+      |
+=========`,
+`  +---+
+  |   |
+  O   |
+ /|\  |
+      |
+      |
+=========`,
+`  +---+
+  |   |
+  O   |
+ /|\  |
+ /    |
+      |
+=========`,
+`  +---+
+  |   |
+  O   |
+ /|\  |
+ / \  |
+      |
+=========`
+    ];
+
+    function pickWord(aniket){
+      secret = words[Math.floor(Math.random(aniket)*words.length)];
+      revealed = Array(secret.length).fill(false);
+      lives = MAX_LIVES;
+      guessed = new Set(aniket);
+      updateAll(aniket);
+    }
+
+    function updateArt(){ artEl.textContent = HANG[MAX_LIVES - lives]; }
+
+    function updateWord(){
+      wordEl.innerHTML = '';
+      for(let i=0;i<secret.length;i++){
+        const span = document.createElement('div');
+        span.className = 'letter';
+        span.textContent = revealed[i] ? secret[i] : '_';
+        wordEl.appendChild(span);
+      }
+    }
+
+    function updateKeyboard(aniket){
+      keyboardEl.innerHTML = '';
+      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+      letters.forEach(ch=>{
+        const btn = document.createElement('button');
+        btn.className = 'key' + (guessed.has(ch) ? ' disabled' : '');
+        btn.textContent = ch;
+        btn.disabled = guessed.has(ch);
+        btn.addEventListener('click', ()=>{ handleGuess(ch); });
+        keyboardEl.appendChild(btn);
+      });
+    }
+
+    function updateStats(){
+      livesEl.textContent = lives;
+      lenEl.textContent = secret.length;
+      scoreEl.textContent = score;
+      guessedEl.textContent = Array.from(guessed).join(', ') || '—';
+    }
+
+    function updateAll(){ updateArt(); updateWord(); updateKeyboard(); updateStats(); }
+
+    function handleGuess(ch){
+      if(guessed.has(ch) || lives <= 0) return;
+      guessed.add(ch);
+      if(secret.includes(ch)){
+        // reveal all occurrences
+        for(let i=0;i<secret.length;i++) if(secret[i] === ch) revealed[i] = true;
+        // award points
+        score += 5;
+      } else {
+        lives -= 1; score = Math.max(0, score - 2);
+      }
+      checkState();
+      updateAll();
+    }
+
+    function checkState(){
+      if(revealed.every(Boolean)){
+        score += lives * 3;
+        setTimeout(()=>{ alert('You win! Score: ' + score); pickWord(); }, 100);
+      } else if(lives <= 0){
+        setTimeout(()=>{ alert('You lost — word was: ' + secret); pickWord(); }, 100);
+      }
+    }
+
+    // hint reveals one unrevealed letter and costs 1 life
+    hintBtn.addEventListener('click', ()=>{
+      if(lives <= 1) return; // leave at least 1 life
+      const indices = revealed.map((v,i)=>v?null:i).filter(x=>x!==null);
+      if(indices.length === 0) return;
+      const idx = indices[Math.floor(Math.random()*indices.length)];
+      revealed[idx] = true;
+      lives -= 1;
+      updateAll();
+      checkState();
+    });
+
+    restartBtn.addEventListener('click', ()=>{ pickWord(); });
+
+    // keyboard input
+    window.addEventListener('keydown', (e)=>{
+      const k = e.key.toUpperCase();
+      if(/^[A-Z]$/.test(k)) handleGuess(k);
+    });
+
+    // init
+    pickWord();
+  })();
+  </script>
+</body>
+</html> 
