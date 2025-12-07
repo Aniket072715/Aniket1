@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ludo King — single file</title>
+  <style>
+    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial}
+    .wrap{display:flex;gap:16px;padding:12px}
+    canvas{background:#f6f6f6;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+    .ui{width:300px}
+    .card{background:#fff;padding:12px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.06)}
+    h2{margin:6px 0 12px}
+    button{padding:10px 12px;border-radius:8px;border:0;background:#111;color:#fff;cursor:pointer}
+    .info{margin:8px 0}
+    .players{display:flex;gap:6px;flex-wrap:wrap}
+    .player-badge{padding:6px 8px;border-radius:8px;background:#eee}
+    small{color:#666}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="board" width="660" height="660"></canvas>
+    <div class="ui">
+      <div class="card">
+        <h2>Ludo (Lite)</h2>
+        <div class="info"><strong id="turn">Turn: Player 1 (Red)</strong></div>
+        <div class="info">Dice: <span id="dice">-</span></div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button id="roll">Roll Dice</button>
+          <button id="reset">Reset</button>
+        </div>
+        <div style="margin-top:10px">
+          <small>Click a token of current player to move (if valid). Need a 6 to leave home.</small>
+        </div>
+      </div>
+      <div style="height:12px"></div>
+      <div class="card">
+        <h3>Players</h3>
+        <div class="players" id="playersList"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Simple Ludo-like single-file implementation (lite)
+    const canvas = document.getElementById('board');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const grid = 11; // 11x11 grid
+    const cell = Math.floor(W / grid);
+
+    // generate path (perimeter walk) - 40 cells
+    const path = [];
+    // top row left->right
+    for(let i=0;i<grid;i++) path.push({x:i,y:0});
+    // right col 1->grid-2
+    for(let j=1;j<grid-1;j++) path.push({x:grid-1,y:j});
+    // bottom row right->left
+    for(let i=grid-1;i>=0;i--) path.push({x:i,y:grid-1});
+    // left col grid-2->1
+    for(let j=grid-2;j>=1;j--) path.push({x:0,y:j});
+    // total positions
+    // make pixel center coords
+    const pathCoords = path.map(p=>({cx: p.x*cell + cell/2, cy: p.y*cell + cell/2}));
+
+    // players setup
+    const colors = ['#E53935','#1E88E5','#43A047','#FB8C00']; // red, blue, green, orange
+    const playerNames = ['Red','Blue','Green','Orange'];
+    const numPlayers = 4;
+    const tokensPerPlayer = 4;
+
+    // start indexes spaced around path
+    const startIndexes = [0, 10, 20, 30];
+
+    // model for players and tokens
+    const players = [];
+    for(let p=0;p<numPlayers;p++){
+      const tokens = [];
+      for(let t=0;t<tokensPerPlayer;t++){
+        tokens.push({pos:-1, // -1 = home, otherwise index in path
+                     steps:0, // how many steps moved (for finishing)
+                     finished:false
+                    });
+      }
+      players.push({id:p,color:colors[p],name:playerNames[p],tokens, start:startIndexes[p]});
+    }
+
+    let currentPlayer = 0;
+    let lastRoll = null;
+
+    const turnEl = document.getElementById('turn');
+    const diceEl = document.getElementById('dice');
+    const playersList = document.getElementById('playersList');
+
+    function updatePlayersList(){
+      playersList.innerHTML='';
+      players.forEach((pl,idx)=>{
+        const div = document.createElement('div');
+        div.className='player-badge';
+        div.style.borderLeft = `8px solid ${pl.color}`;
+        div.textContent = `${pl.name} — finished: ${pl.tokens.filter(t=>t.finished).length}`;
+        playersList.appendChild(div);
+      })
+    }
+
+    function resetGame(){
+      players.forEach(p=>p.tokens.forEach(t=>{t.pos=-1;t.steps=0;t.finished=false}));
+      currentPlayer = 0; lastRoll=null; diceEl.textContent='-';
+      turnEl.textContent = `Turn: Player ${currentPlayer+1} (${players[currentPlayer].name})`;
+      draw(); updatePlayersList();
+    }
+
+    document.getElementById('reset').addEventListener('click', resetGame);
+
+    function rollDice(){
+      lastRoll = Math.floor(Math.random()*6)+1;
+      diceEl.textContent = lastRoll;
+      console.log('rolled', lastRoll);
+    }
+    document.getElementById('roll').addEventListener('click', ()=>{
+      rollDice();
+      // If no possible moves, auto end turn (except if roll 6 -> get extra turn)
+      const moves = availableMoves(currentPlayer, lastRoll);
+      if(moves.length===0){
+        if(lastRoll===6){
+          // nothing but extra turn stays
+          // stay on same player
+        } else {
+          nextPlayer();
+        }
+      }
+      draw();
+    });
+
+    function nextPlayer(){
+      currentPlayer = (currentPlayer+1)%numPlayers;
+      turnEl.textContent = `Turn: Player ${currentPlayer+1} (${players[currentPlayer].name})`;
+      lastRoll = null; diceEl.textContent='-';
+    }
+
+    function availableMoves(pid, roll){
+      if(roll==null) return [];
+      const pl = players[pid];
+      const moves = [];
+      pl.tokens.forEach((t,ti)=>{
+        if(t.finished) return;
+        if(t.pos==-1){
+          if(roll===6) moves.push({token:ti,from:-1,to:pl.start,steps:1});
+        } else {
+          const newSteps = t.steps + roll;
+          if(newSteps >= pathCoords.length) {
+            // finish -- allow exact or overshoot? we'll allow >= for simplicity
+            moves.push({token:ti,from:t.pos,to:'FINISH',steps:roll});
+          } else {
+            moves.push({token:ti,from:t.pos,to:(t.pos+roll)%pathCoords.length,steps:roll});
+          }
+        }
+      });
+      return moves;
+    }
+
+    // click to move token
+    canvas.addEventListener('click', (e)=>{
+      if(lastRoll==null) return; // must roll first
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left, y = e.clientY - rect.top;
+      // check each token of current player
+      const pl = players[currentPlayer];
+      for(let ti=0; ti<pl.tokens.length; ti++){
+        const t = pl.tokens[ti];
+        const screen = tokenScreenPos(currentPlayer, ti);
+        const dx = x-screen.x, dy = y-screen.y;
+        if(Math.hypot(dx,dy) < 18){
+          // clicked this token
+          const moves = availableMoves(currentPlayer,lastRoll);
+          const chosen = moves.find(m=>m.token===ti);
+          if(!chosen){
+            // invalid move
+            // small shake or flash can be added
+            return;
+          }
+          // perform move
+          if(chosen.to==='FINISH'){
+            t.finished = true; t.pos = -2; t.steps += chosen.steps;
+          } else {
+            if(t.pos===-1){
+              t.pos = chosen.to; t.steps = 1; // left home
+            } else {
+              t.pos = chosen.to; t.steps += chosen.steps;
+            }
+          }
+          // if roll was 6 -> same player gets another turn
+          const won = players[currentPlayer].tokens.every(tt=>tt.finished);
+          if(won){
+            alert(`${players[currentPlayer].name} wins!`);
+            resetGame();
+            return;
+          }
+          if(lastRoll!==6) nextPlayer(); else { lastRoll=null; diceEl.textContent='-'; }
+          draw(); updatePlayersList();
+          return;
+        }
+      }
+    });
+
+    function tokenScreenPos(pid, tid){
+      const token = players[pid].tokens[tid];
+      if(token.pos===-1){
+        // draw inside home area near corners
+        const corner = pid;
+        // map corner to home cell center
+        const homeCenters = [ {x:1,y:1}, {x:9,y:1}, {x:9,y:9}, {x:1,y:9} ];
+        const hc = homeCenters[corner];
+        // offset tokens slightly
+        const ox = (tid%2)*18 - 9;
+        const oy = (Math.floor(tid/2))*18 - 9;
+        return {x: hc.x*cell + cell/2 + ox, y: hc.y*cell + cell/2 + oy};
+      } else if(token.pos===-2){
+        // finished pile near center
+        const finishPile = {x:5*cell + cell/2, y:5*cell + cell/2};
+        const ox = (tid%2)*18 - 9; const oy = (Math.floor(tid/2))*18 - 9;
+        return {x: finishPile.x + ox, y: finishPile.y + oy};
+      } else {
+        const p = pathCoords[token.pos];
+        // minor offset if many tokens on same cell
+        // compute how many tokens occupy this coordinate for stacking
+        const stackIndex = stackIndexOnCell(pid, token.pos, tid);
+        const ox = (stackIndex%2)*16 - 8; const oy = Math.floor(stackIndex/2)*16 - 8;
+        return {x: p.cx + ox, y: p.cy + oy};
+      }
+    }
+
+    function stackIndexOnCell(pid, pos, tid){
+      // naive: count total tokens on the same pos across all players and order
+      let arr = [];
+      players.forEach((pl,pi)=>pl.tokens.forEach((t,ti)=>{ if(t.pos===pos) arr.push({pid:pi,tid:ti}) }));
+      // find index of our token in that array
+      for(let i=0;i<arr.length;i++) if(arr[i].pid===pid && arr[i].tid===tid) return i;
+      return 0;
+    }
+
+    function drawGrid(){
+      // background grid
+      ctx.clearRect(0,0,W,H);
+      ctx.strokeStyle = '#ddd';
+      for(let i=0;i<=grid;i++){
+        ctx.beginPath(); ctx.moveTo(i*cell,0); ctx.lineTo(i*cell,H); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,i*cell); ctx.lineTo(W,i*cell); ctx.stroke();
+      }
+
+      // draw center safe area
+      ctx.fillStyle='#fff';
+      ctx.fillRect(4*cell,4*cell,3*cell,3*cell);
+      ctx.strokeStyle='#ccc'; ctx.strokeRect(4*cell,4*cell,3*cell,3*cell);
+
+      // draw home squares (corners)
+      const homes = [ {x:0,y:0},{x:8,y:0},{x:8,y:8},{x:0,y:8} ];
+      homes.forEach((h,idx)=>{
+        ctx.fillStyle = players[idx].color + '55';
+        ctx.fillRect(h.x*cell, h.y*cell, 3*cell, 3*cell);
+        ctx.strokeStyle = '#999'; ctx.strokeRect(h.x*cell, h.y*cell, 3*cell, 3*cell);
+        // draw small token placeholders
+        for(let t=0;t<tokensPerPlayer;t++){
+          const col = players[idx].color;
+          const ox = (t%2)*18 - 9;
+          const oy = Math.floor(t/2)*18 - 9;
+          const cx = (h.x+1)*cell + cell/2 + ox;
+          const cy = (h.y+1)*cell + cell/2 + oy;
+          ctx.beginPath(); ctx.fillStyle = col; ctx.arc(cx,cy,10,0,Math.PI*2); ctx.fill();
+        }
+      });
+
+      // draw path positions
+      pathCoords.forEach((p,i)=>{
+        ctx.beginPath(); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#bbb';
+        ctx.arc(p.cx, p.cy, 18, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+      });
+
+      // draw start markers
+      startIndexes.forEach((si,pi)=>{
+        const p = pathCoords[si]; ctx.fillStyle = players[pi].color; ctx.fillRect(p.cx-10,p.cy-10,20,20);
+      });
+    }
+
+    function drawTokens(){
+      players.forEach((pl,pi)=>{
+        pl.tokens.forEach((t,ti)=>{
+          const pos = tokenScreenPos(pi,ti);
+          ctx.beginPath(); ctx.fillStyle = pl.color; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+          ctx.arc(pos.x,pos.y,14,0,Math.PI*2); ctx.fill(); ctx.stroke();
+          // token label
+          ctx.fillStyle = '#fff'; ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+          ctx.fillText((ti+1)+'', pos.x, pos.y);
+        })
+      })
+    }
+
+    function draw(){
+      drawGrid(); drawTokens();
+    }
+
+    // initialize
+    resetGame();
+    draw();
+
+  </script>
+</body>
+</html>
