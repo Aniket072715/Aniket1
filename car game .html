@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dr Driving - Simple HTML5 Clone</title>
+  <style>
+    :root{--bg:#171717;--road:#333;--line:#e6e6e6;--hud:#ffffff}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial;background:var(--bg);color:var(--hud)}
+    .wrap{display:flex;gap:20px;align-items:flex-start;padding:18px}
+    canvas{background:linear-gradient(#3a3a3a,#262626);border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,0.6)}
+    .panel{max-width:320px}
+    h1{margin:0 0 8px 0;font-size:18px}
+    p.small{margin:4px 0;font-size:13px;color:#bdbdbd}
+    button{background:#1e90ff;border:none;padding:10px 12px;border-radius:8px;color:white;font-weight:600;cursor:pointer}
+    .controls{display:flex;gap:8px;margin-top:10px}
+    .hint{margin-top:8px;font-size:13px;color:#cfcfcf}
+    .stat{margin-top:12px;background:#0f0f0f;padding:10px;border-radius:8px}
+    label{display:block;margin-top:8px;font-size:13px}
+    input[type=range]{width:100%}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="game" width="720" height="480"></canvas>
+    <div class="panel">
+      <h1>Dr Driving — Simple HTML5 Clone</h1>
+      <p class="small">Keyboard: ← → to steer, Up to accelerate, Down to brake. Tap left/right on mobile.</p>
+      <div class="controls">
+        <button id="startBtn">Start / Restart</button>
+        <button id="pauseBtn">Pause</button>
+      </div>
+      <div class="stat">
+        <div>Speed: <span id="speed">0</span> km/h</div>
+        <div>Distance: <span id="distance">0</span> m</div>
+        <div>Score: <span id="score">0</span></div>
+      </div>
+      <label>Traffic density</label>
+      <input id="density" type="range" min="0" max="1" step="0.05" value="0.35">
+      <div class="hint">Tap the canvas left/right to steer on touch devices. This is a lightweight demo — tell me any feature you'd like (missions, fuel, car selection).</div>
+    </div>
+  </div>
+
+<script>
+// Simple driving game inspired by Dr Driving
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  // HUD elements
+  const speedEl = document.getElementById('speed');
+  const distanceEl = document.getElementById('distance');
+  const scoreEl = document.getElementById('score');
+  const startBtn = document.getElementById('startBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const density = document.getElementById('density');
+
+  let last = 0, running = false, paused = false;
+  let speed = 0; // km/h
+  let distance = 0; // meters
+  let score = 0;
+  const maxSpeed = 180; // km/h
+
+  // Road & lanes
+  const road = {x: W*0.1, w: W*0.8};
+  const lanes = 3;
+  const laneWidth = road.w / lanes;
+
+  // Player car
+  const player = {
+    lane: 1, // 0..(lanes-1)
+    x: 0, y: H - 110,
+    w: 50, h: 90,
+    targetX:0,
+    steer:0 // -1..1
+  };
+  player.x = road.x + player.lane * laneWidth + (laneWidth - player.w)/2;
+
+  // Obstacles (traffic)
+  let obstacles = [];
+  function spawnObstacle(){
+    const lane = Math.floor(Math.random()*lanes);
+    const type = Math.random() < 0.8 ? 'car' : 'truck';
+    const w = type==='car'? 48 : 80;
+    const h = type==='car'? 90 : 110;
+    const speedRel = 20 + Math.random()*60; // km/h differential
+    obstacles.push({lane, x: road.x + lane*laneWidth + (laneWidth-w)/2, y:-h, w, h, speed: speedRel});
+  }
+
+  // Controls
+  const keys = {};
+  window.addEventListener('keydown', e=>{keys[e.key]=true});
+  window.addEventListener('keyup', e=>{keys[e.key]=false});
+
+  // Touch steering
+  canvas.addEventListener('touchstart', e=>{
+    e.preventDefault();
+    const t = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = t.clientX - rect.left;
+    if(x < W/2) keys['touchLeft']=true; else keys['touchRight']=true;
+  }, {passive:false});
+  canvas.addEventListener('touchend', e=>{keys['touchLeft']=false; keys['touchRight']=false});
+
+  // Game loop
+  function reset(){
+    obstacles = [];
+    speed = 0;
+    distance = 0;
+    score = 0;
+    player.lane = 1;
+    player.x = road.x + player.lane * laneWidth + (laneWidth - player.w)/2;
+    last = performance.now();
+  }
+
+  function update(dt){
+    // Controls
+    const accel = (keys['ArrowUp'] || keys['w'])? 80 : 0; // km/h^2 approx
+    const brake = (keys['ArrowDown'] || keys['s'])? 200 : 0;
+    if(keys['ArrowLeft'] || keys['a'] || keys['touchLeft']) player.steer = -1;
+    else if(keys['ArrowRight'] || keys['d'] || keys['touchRight']) player.steer = 1;
+    else player.steer = 0;
+
+    // Speed physics
+    if(accel) speed += accel * dt;
+    if(player.steer !== 0) speed -= 10*dt; // small penalty while turning
+    if(brake) speed -= brake*dt;
+    // air drag
+    speed -= Math.max(0,(speed/120))*20*dt;
+    speed = Math.max(0, Math.min(maxSpeed, speed));
+
+    // Update distance
+    distance += (speed/3.6) * dt; // meters (speed km/h -> m/s)
+
+    // Move player horizontally smoothly
+    const targetLane = Math.max(0, Math.min(lanes-1, player.lane + (player.steer>0?0.02: player.steer<0?-0.02:0)) );
+    // allow lane change via quick taps: keyboard or steering holds
+    if(player.steer > 0) player.lane = Math.min(lanes-1, player.lane + 0.02);
+    if(player.steer < 0) player.lane = Math.max(0, player.lane - 0.02);
+    player.targetX = road.x + Math.round(player.lane) * laneWidth + (laneWidth - player.w)/2;
+    // interpolation
+    player.x += (player.targetX - player.x) * Math.min(1, 6*dt);
+
+    // Spawn obstacles based on density
+    const dens = parseFloat(density.value);
+    if(Math.random() < 0.015 + dens*0.1) spawnObstacle();
+
+    // Update obstacles
+    for(let i=obstacles.length-1;i>=0;i--){
+      const o = obstacles[i];
+      // obstacles move downward relative to player speed
+      const relSpeed = ((speed - o.speed)/3.6); // m/s
+      o.y += ( -relSpeed + 120*dt ); // base movement to make them come
+      // simple removal
+      if(o.y > H + 200) obstacles.splice(i,1);
+      // collision check
+      if(rectsOverlap(player.x, player.y, player.w, player.h, o.x, o.y, o.w, o.h)){
+        // collision occurred
+        running = false;
+        paused = false;
+        score -= 100;
+        alert('Crashed! Final score: ' + Math.max(0, Math.floor(score)));
+        break;
+      }
+    }
+
+    // Scoring
+    score = Math.floor(distance) + Math.floor(speed*2);
+
+    // Update HUD
+    speedEl.textContent = Math.round(speed);
+    distanceEl.textContent = Math.floor(distance);
+    scoreEl.textContent = Math.max(0, Math.floor(score));
+  }
+
+  function rectsOverlap(x1,y1,w1,h1,x2,y2,w2,h2){
+    return !(x2 > x1 + w1 || x2 + w2 < x1 || y2 > y1 + h1 || y2 + h2 < y1);
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+
+    // Draw sky / background
+    ctx.fillStyle = '#222';
+    ctx.fillRect(0,0,W,H);
+
+    // Draw road
+    ctx.fillStyle = '#2b2b2b';
+    ctx.fillRect(road.x, 0, road.w, H);
+
+    // Side borders
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, road.x, H);
+    ctx.fillRect(road.x+road.w, 0, W - (road.x+road.w), H);
+
+    // Lane lines
+    ctx.strokeStyle = '#d9d9d9';
+    ctx.lineWidth = 4;
+    for(let i=1;i<lanes;i++){
+      const lx = road.x + i * laneWidth;
+      // dashed
+      ctx.setLineDash([30, 20]);
+      ctx.beginPath();
+      ctx.moveTo(lx, -((distance)%60));
+      ctx.lineTo(lx, H+100);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Draw obstacles
+    for(const o of obstacles){
+      ctx.fillStyle = '#9b2d2d';
+      if(o.w>60) ctx.fillStyle = '#3b6b9c';
+      ctx.fillRect(o.x, o.y, o.w, o.h);
+      // windows
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.fillRect(o.x + 8, o.y + 12, o.w - 16, 22);
+    }
+
+    // Draw player car
+    ctx.save();
+    ctx.translate(player.x + player.w/2, player.y + player.h/2);
+    const tilt = (player.steer) * 0.12;
+    ctx.rotate(tilt);
+    ctx.fillStyle = '#ffcc00';
+    roundRect(ctx, -player.w/2, -player.h/2, player.w, player.h, 8, true, false);
+    // windscreen
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(-player.w/4, -player.h/2 + 12, player.w/2, 22);
+    ctx.restore();
+
+    // HUD overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(12,12,210,70);
+    ctx.fillStyle = '#fff';
+    ctx.font = '14px Arial';
+    ctx.fillText('Speed: ' + Math.round(speed) + ' km/h', 22, 34);
+    ctx.fillText('Distance: ' + Math.floor(distance) + ' m', 22, 54);
+  }
+
+  function roundRect(ctx, x, y, w, h, r, fill, stroke) {
+    if (typeof r === 'undefined') r = 5;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+  }
+
+  function loop(now){
+    if(!running || paused){ last = now; requestAnimationFrame(loop); return; }
+    const dt = Math.min(0.05, (now - last)/1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Buttons
+  startBtn.addEventListener('click', ()=>{ reset(); running = true; paused = false; requestAnimationFrame(loop); });
+  pauseBtn.addEventListener('click', ()=>{ paused = !paused; pauseBtn.textContent = paused ? 'Resume' : 'Pause'; });
+
+  // Quick tap lane change
+  canvas.addEventListener('click', e=>{
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    if(x < W/2) player.lane = Math.max(0, Math.round(player.lane) - 1);
+    else player.lane = Math.min(lanes-1, Math.round(player.lane) + 1);
+    player.targetX = road.x + player.lane * laneWidth + (laneWidth - player.w)/2;
+  });
+
+  // initial draw
+  draw();
+
+})();
+</script>
+</body>
+</html>
