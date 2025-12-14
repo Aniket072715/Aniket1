@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mini Hacking Demo (Fake)</title>
+  <style>
+    /* Basic reset */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html,body { height: 100%; background: #050505; color: #0f0; font-family: "Courier New", monospace; }
+
+    /* Fullscreen container */
+    .stage {
+      position: relative;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Matrix rain canvas sits behind everything */
+    #matrix {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      opacity: 0.12;
+      filter: blur(0.2px);
+    }
+
+    /* Terminal card */
+    .terminal {
+      position: relative;
+      z-index: 2;
+      width: min(980px, 92%);
+      max-width: 980px;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(0,255,0,0.08);
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.7);
+    }
+
+    .term-header {
+      display:flex;
+      gap:8px;
+      align-items:center;
+      margin-bottom:12px;
+    }
+    .dots { display:flex; gap:6px; }
+    .dot {
+      width:12px; height:12px; border-radius:50%;
+      background: rgba(255,255,255,0.08);
+      box-shadow: 0 0 6px rgba(0,0,0,0.6) inset;
+    }
+    .dot.red { background: #ff5f56; }
+    .dot.yellow { background: #ffbd2e; }
+    .dot.green { background: #27c93f; }
+
+    .title { margin-left:auto; color: rgba(0,255,0,0.85); font-weight:700; font-size:14px; }
+
+    /* Content area looks like a terminal window */
+    .content {
+      background: linear-gradient(180deg, rgba(0,0,0,0.08), transparent);
+      border-radius: 6px;
+      padding: 18px;
+      min-height: 240px;
+      color: #b8f2b8;
+      font-size: 15px;
+      line-height: 1.35;
+      overflow: hidden;
+    }
+
+    .line { white-space: pre-wrap; word-break:break-word; }
+
+    /* typing caret */
+    .caret {
+      display:inline-block;
+      width:8px;
+      height:18px;
+      background: #0f0;
+      margin-left:6px;
+      vertical-align:bottom;
+      animation: blink 1s steps(2, start) infinite;
+    }
+    @keyframes blink { 50% { opacity: 0 } }
+
+    /* small status bar */
+    .status {
+      margin-top:14px;
+      font-size:13px;
+      color: rgba(0,255,0,0.7);
+      display:flex;
+      gap:12px;
+      align-items:center;
+    }
+
+    .badge {
+      background: rgba(0,255,0,0.06);
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(0,255,0,0.06);
+    }
+
+    /* ACCESS GRANTED big overlay */
+    .access {
+      position:absolute;
+      inset: 0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:3;
+      pointer-events:none;
+      font-size:82px;
+      font-weight:900;
+      color: rgba(0,255,100,0.08);
+      transform: rotate(-8deg);
+      text-shadow: 0 0 40px rgba(0,255,0,0.08);
+      mix-blend-mode: overlay;
+    }
+
+    /* small responsive tweaks */
+    @media (max-width:520px) {
+      .access { font-size:36px }
+      .content { min-height:180px }
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <canvas id="matrix"></canvas>
+
+    <div class="terminal" role="region" aria-label="Fake terminal">
+      <div class="term-header">
+        <div class="dots">
+          <div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div>
+        </div>
+        <div class="title">root@mini-demo: ~</div>
+      </div>
+
+      <div class="content" id="content" aria-live="polite"></div>
+
+      <div class="status">
+        <div class="badge" id="status-time">Time: --</div>
+        <div class="badge" id="status-ip">IP: 192.168.0.1</div>
+        <div class="badge" id="status-progress">Progress: 0%</div>
+      </div>
+
+      <div class="access" id="accessOverlay">ACCESS GRANTED</div>
+    </div>
+  </div>
+
+  <script>
+    /***********************
+     * Matrix rain effect  *
+     ***********************/
+    (function matrixRain() {
+      const c = document.getElementById('matrix');
+      const ctx = c.getContext('2d');
+      function fit() {
+        c.width = innerWidth;
+        c.height = innerHeight;
+      }
+      addEventListener('resize', fit);
+      fit();
+
+      const cols = Math.floor(c.width / 14);
+      const drops = new Array(cols).fill(1);
+      const chars = "01░▒▓█<>/\\+=-()[]{}*#$%&@";
+      function draw() {
+        ctx.fillStyle = 'rgba(0,0,0,0.06)';
+        ctx.fillRect(0, 0, c.width, c.height);
+
+        ctx.fillStyle = '#00ff66';
+        ctx.font = '14px Courier New';
+        for (let i = 0; i < drops.length; i++) {
+          const text = chars.charAt(Math.floor(Math.random() * chars.length));
+          ctx.fillText(text, i * 14, drops[i] * 14);
+          if (drops[i] * 14 > c.height && Math.random() > 0.985) drops[i] = 0;
+          drops[i]++;
+        }
+      }
+      setInterval(draw, 55);
+    })();
+
+    /*******************************
+     * Fake typing / terminal demo *
+     *******************************/
+    (function fakeTerminal() {
+      const content = document.getElementById('content');
+      const progressBadge = document.getElementById('status-progress');
+      const timeBadge = document.getElementById('status-time');
+      const access = document.getElementById('accessOverlay');
+
+      const scripts = [
+        { t: "INITIALIZING: Secure module loader\n" },
+        { t: "Establishing encrypted handshake with remote host...\n" },
+        { t: "Handshake OK\n" },
+        { t: "Querying node list: [alpha, beta, gamma]\n" },
+        { t: "Injecting payload: /usr/local/bin/flash.bin\n" },
+        { t: "Payload checksum: 0x" + Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6,'0') + "\n" },
+        { t: "Deploying...\n" },
+        { t: "Deployment progress: 0%" , p: 0 },
+        { t: "Deployment progress: 25%" , p: 25 },
+        { t: "Deployment progress: 50%" , p: 50 },
+        { t: "Deployment progress: 75%" , p: 75 },
+        { t: "Finalizing...\n" },
+        { t: "ACCESS CHECK: SUCCESS\n" },
+        { t: "Cleaning logs...\n" },
+        { t: "Done.\n" },
+        { t: ">>> session closed <<<\n" }
+      ];
+
+      // utility: append a line with typing effect
+      async function typeLine(text, speed = 18) {
+        const line = document.createElement('div');
+        line.className = 'line';
+        content.appendChild(line);
+        for (let i = 0; i < text.length; i++) {
+          line.textContent += text[i];
+          content.scrollTop = content.scrollHeight;
+          await new Promise(r => setTimeout(r, speed + Math.random()*10));
+        }
+      }
+
+      // run script sequence
+      (async function run() {
+        access.style.opacity = '0.06'; // subtle overlay until final
+        for (let step of scripts) {
+          if (step.p !== undefined) {
+            // update progress-only line quickly
+            await typeLine(step.t + '\n', 6);
+            progressBadge.textContent = 'Progress: ' + step.p + '%';
+          } else {
+            await typeLine(step.t, 16);
+          }
+          // update time badge
+          const now = new Date();
+          timeBadge.textContent = 'Time: ' + now.toLocaleTimeString();
+          // small pause between lines
+          await new Promise(r => setTimeout(r, 200 + Math.random()*400));
+        }
+        // final dramatic reveal
+        access.style.transition = 'opacity 480ms ease, transform 420ms ease';
+        access.style.opacity = '0.28';
+        access.style.transform = 'rotate(-3deg) scale(1.02)';
+        progressBadge.textContent = 'Progress: 100%';
+      })();
+    })();
+
+    /**************************************
+     * Accessibility & harmless reminder  *
+     **************************************/
+    // This is a purely visual demo. Never use code to access systems
+    // without explicit authorization — that's illegal and unethical.
+  </script>
+</body>
+</html>
