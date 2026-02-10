@@ -1,0 +1,139 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<title>Car Dodge Pro</title>
+<style>
+body{
+  margin:0;
+  background:#0f0f0f;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+  font-family:Arial;
+}
+
+#game{
+  width:320px;
+  height:520px;
+  background:#333;
+  position:relative;
+  overflow:hidden;
+  border-radius:12px;
+  box-shadow:0 0 20px #00ffcc;
+}
+
+.road-line{
+  width:10px;
+  height:60px;
+  background:white;
+  position:absolute;
+  left:155px;
+  opacity:0.8;
+}
+
+#player{
+  width:50px;
+  height:80px;
+  background:linear-gradient(red, darkred);
+  position:absolute;
+  bottom:15px;
+  left:135px;
+  border-radius:10px;
+}
+
+.enemy{
+  width:50px;
+  height:80px;
+  background:linear-gradient(black, #222);
+  position:absolute;
+  top:-100px;
+  border-radius:10px;
+}
+
+#score{
+  position:absolute;
+  color:#00ffcc;
+  top:10px;
+  left:10px;
+  font-size:18px;
+}
+</style>
+</head>
+<body>
+
+<div id="game">
+  <div id="score">Score: 0</div>
+  <div id="player"></div>
+</div>
+
+<script>
+const game = document.getElementById("game");
+const player = document.getElementById("player");
+const scoreText = document.getElementById("score");
+
+let playerX = 135;
+let score = 0;
+let speed = 4;
+
+// Move player
+document.addEventListener("keydown", e => {
+  if(e.key==="ArrowLeft" && playerX>20) playerX -= 40;
+  if(e.key==="ArrowRight" && playerX<250) playerX += 40;
+  player.style.left = playerX+"px";
+});
+
+// Road lines
+for(let i=0;i<6;i++){
+  let line=document.createElement("div");
+  line.className="road-line";
+  line.style.top=i*90+"px";
+  game.appendChild(line);
+
+  let y=i*90;
+  setInterval(()=>{
+    y+=speed;
+    if(y>520) y=-60;
+    line.style.top=y+"px";
+  },20);
+}
+
+// Enemy cars
+function createEnemy(){
+  let enemy=document.createElement("div");
+  enemy.className="enemy";
+  enemy.style.left=[30,135,235][Math.floor(Math.random()*3)]+"px";
+  game.appendChild(enemy);
+
+  let y=-100;
+  let move=setInterval(()=>{
+    y+=speed;
+
+    enemy.style.top=y+"px";
+
+    // Collision
+    if(
+      y>400 &&
+      enemy.offsetLeft < playerX+50 &&
+      enemy.offsetLeft+50 > playerX
+    ){
+      alert("Game Over! Score: "+score);
+      location.reload();
+    }
+
+    if(y>520){
+      clearInterval(move);
+      game.removeChild(enemy);
+      score++;
+      if(score%5===0) speed++; // increase speed
+      scoreText.innerText="Score: "+score;
+    }
+  },20);
+}
+
+setInterval(createEnemy, 1300);
+</script>
+
+</body>
+</html>
